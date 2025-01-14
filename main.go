@@ -27,6 +27,24 @@ const (
 	Format32bppArgb
 )
 
+var messageQueue []string
+var messageMutex sync.Mutex
+
+func safePrint(message string) {
+	messageMutex.Lock()
+	defer messageMutex.Unlock()
+	messageQueue = append(messageQueue, message)
+}
+
+func flushMessages() {
+	messageMutex.Lock()
+	defer messageMutex.Unlock()
+	for _, message := range messageQueue {
+		fmt.Println(message)
+	}
+	messageQueue = nil
+}
+
 func calculateMaxResolution(originalWidth, originalHeight int, pixelFormat PixelFormat, alignment int, memoryLimit int64, dpi int) (int, int) {
 	bytesPerPixel := getBytesPerPixel(pixelFormat)
 	aspectRatio := float64(originalWidth) / float64(originalHeight)
@@ -79,7 +97,6 @@ func extractDPI(filePath string) (int, error) {
 
 	e, err := exif.Decode(file)
 	if err != nil {
-		// Return a more descriptive error
 		return 0, fmt.Errorf("no EXIF data or corrupted EXIF data: %w", err)
 	}
 
@@ -129,13 +146,7 @@ func resizeImage(filePath, outputPath string, dryRun bool, memoryLimit int64, al
 	if newWidth < originalWidth || newHeight < originalHeight {
 		resized := resize.Resize(uint(newWidth), uint(newHeight), img, algorithm)
 		newDPI := int(float64(newWidth) / (float64(originalWidth) / float64(dpi)))
-		fmt.Printf("Rescaled to %dx%d with DPI %d\n", newWidth, newHeight, newDPI)
-
-		if !dryRun {
-			if err := saveImage(resized, outputPath, format, quality, newDPI); err != nil {
-				return err
-			}
-		}
+		return saveImage(resized, outputPath, format, quality, newDPI)
 	}
 
 	return nil
@@ -150,25 +161,18 @@ func saveImage(img image.Image, outputPath, format string, quality, dpi int) err
 
 	switch format {
 	case "png":
-		err = png.Encode(outFile, img)
-		if err != nil {
+		if err = png.Encode(outFile, img); err != nil {
 			return fmt.Errorf("failed to encode PNG: %w", err)
 		}
 		return nil
-
 	case "jpeg":
-		// Encode the image to a buffer
 		buffer := new(bytes.Buffer)
-		err = jpeg.Encode(buffer, img, &jpeg.Options{Quality: quality})
-		if err != nil {
+		if err = jpeg.Encode(buffer, img, &jpeg.Options{Quality: quality}); err != nil {
 			return fmt.Errorf("failed to encode JPEG: %w", err)
 		}
-
-		_, err = outFile.Write(buffer.Bytes())
-		if err != nil {
+		if _, err = outFile.Write(buffer.Bytes()); err != nil {
 			return fmt.Errorf("failed to write JPEG data: %w", err)
 		}
-
 	default:
 		return fmt.Errorf("unsupported output format: %s", format)
 	}
@@ -179,8 +183,8 @@ func saveImage(img image.Image, outputPath, format string, quality, dpi int) err
 func main() {
 	var args = os.Args[1:]
 	if len(args) == 0 && mousetrap.StartedByExplorer() {
-		fmt.Println("This application cannot be run by double-clicking it. Please run it from a console or drag your images onto the executable.")
-		fmt.Println("Press Enter to exit...")
+		safePrint("This application cannot be run by double-clicking it. Please run it from a console or drag your images onto the executable.")
+		safePrint("Press Enter to exit...")
 		_, err := fmt.Scanln()
 		if err != nil {
 			return
@@ -253,14 +257,14 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		fmt.Println("Error:", err)
+		safePrint(fmt.Sprintf("Error: %v", err))
 	}
 }
 
 func processPath(path string, memoryLimit int64, outputDir string, algorithm resize.InterpolationFunction, quality int, dryRun, recursive bool, dpi int) {
 	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Println("Error accessing path:", err)
+		safePrint(fmt.Sprintf("Error accessing path: %v", err))
 		return
 	}
 
@@ -272,6 +276,8 @@ func processPath(path string, memoryLimit int64, outputDir string, algorithm res
 		files = []string{path}
 	}
 
+	// write that we are processing the files
+	safePrint(fmt.Sprintf("Processing %d files", len(files)))
 	bar := pb.StartNew(len(files))
 
 	var wg sync.WaitGroup
@@ -289,24 +295,23 @@ func processPath(path string, memoryLimit int64, outputDir string, algorithm res
 
 	wg.Wait()
 	bar.Finish()
+
+	flushMessages()
 }
 
 func processFile(filePath string, memoryLimit int64, outputDir string, algorithm resize.InterpolationFunction, quality int, dryRun bool, bar *pb.ProgressBar, overrideDPI int) {
-	// Ensure the output directory exists
+	defer bar.Increment()
+
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
-		fmt.Printf("\nError creating output directory: %v\n", err)
-		bar.Increment()
+		safePrint(fmt.Sprintf("Error creating output directory: %v", err))
 		return
 	}
 
-	// Generate the output file path in the specified directory
 	outputFileName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + "-resized" + filepath.Ext(filePath)
 	outputPath := filepath.Join(outputDir, outputFileName)
 
 	if _, err := os.Stat(outputPath); err == nil {
-		fmt.Printf("\nSkipping existing file: %s\n", outputPath)
-
-		bar.Increment()
+		safePrint(fmt.Sprintf("Skipping existing file: %s", outputPath))
 		return
 	}
 
@@ -314,22 +319,20 @@ func processFile(filePath string, memoryLimit int64, outputDir string, algorithm
 	if overrideDPI == 0 {
 		if extractedDPI, err := extractDPI(filePath); err == nil {
 			dpi = extractedDPI
-			fmt.Printf("\nExtracted DPI for %s: %d\n", filePath, dpi)
+			safePrint(fmt.Sprintf("Extracted DPI for %s: %d", filePath, dpi))
 		} else {
-			fmt.Printf("\nFailed to extract DPI for %s: %v. Using default input DPI: 72\n", filePath, err)
 			dpi = 72
+			safePrint(fmt.Sprintf("Failed to extract DPI for %s: %v", filePath, err))
 		}
 	} else {
 		dpi = overrideDPI
 	}
 
-	fmt.Printf("\nProcessing %s\n", filePath)
+	safePrint(fmt.Sprintf("Processing %s", filePath))
 
 	if err := resizeImage(filePath, outputPath, dryRun, memoryLimit, algorithm, quality, dpi); err != nil {
-		fmt.Printf("\nError resizing image: %v\n", err)
+		safePrint(fmt.Sprintf("Error resizing image: %v", err))
 	}
-
-	bar.Increment()
 }
 
 func collectFiles(dir string, recursive bool) []string {
