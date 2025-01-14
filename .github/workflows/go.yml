@@ -57,7 +57,7 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v3
         with:
-          name: resizer-zip
+          name: resizer-windows-zip
           path: .
 
 
