@@ -6,22 +6,21 @@ The **Image Resizer Tool** is a fast and efficient command-line application writ
 
 ## Background
 
-GDI+ is a graphics subsystem introduced with **Windows XP** in 2001, succeeding the original Graphics Device Interface (GDI). It provides tools for rendering images, drawing graphics, and displaying formatted text. While modern frameworks like Windows Presentation Foundation (WPF) have largely replaced GDI+ for new applications, GDI+ remains crucial for legacy software and certain Windows components.
+GDI+ is a graphics subsystem introduced with **Windows XP** in 2001, succeeding the original Graphics Device Interface (GDI). It provides an API for rendering images, drawing graphics, and displaying formatted text. While modern frameworks like Windows Presentation Foundation (WPF) have largely replaced GDI+ for new applications, GDI+ remains crucial for legacy software and certain Windows components.
 
 When GDI+ processes an image, it expands compressed files (e.g., PNG, JPEG) into uncompressed **bitmaps**. A bitmap is a multidimensional array of pixels, where each pixel contains data for **red, green, blue (RGB)** and sometimes an **alpha channel** (transparency). This structure requires significant memory:
 
 1. **Contiguous Memory Allocation**: GDI+ requires memory for bitmaps to be allocated as a single, continuous block.
 2. **Dynamic Allocation**: Image sizes and formats vary, making memory requirements unpredictable at compile time.
 
-This exceeds the 2 GB heap limit on 32-bit systems and the .net platform, resulting in errors such as **"Parameter is not valid"** and **"bufferOverflow"** exceptions.
+These requirements necessitate that the bitmaps are stored in **heap memory**, which is limited by the operating system and the application's platform. For example, a 32-bit application on a 32-bit Windows system can only access up to **2 GB** of heap memory. If an image exceeds this limit when uncompressed, GDI+ operations will fail and may cause the application to be unable to load the image file or crash. This tool addresses these limitations by resizing images to fit within a specified memory limit when uncompressed, ensuring compatibility with GDI+ and other memory-constrained environments.
 
-This tool addresses these limitations by resizing images to fit within a specified memory limit when uncompressed, ensuring compatibility with GDI+ and other memory-constrained environments.
 ---
 
 ## Features
 
-- **Memory-Constrained Resizing**: Ensures resized images remain within a specified memory limit.
-- **Customizable Resizing Algorithms**: Choose from high-quality Lanczos3, Bilinear, or NearestNeighbor methods.
+- **Memory-Constrained Resizing**: Ensures resized images remain within a specified memory limit when loaded as a GDI+ bitmap.
+- **Customizable Resizing Algorithms**: Choose from high-quality Lanczos3, Bilinear, or Nearest Neighbor methods.
 - **JPEG Quality Control**: Adjust JPEG compression quality (1-100).
 - **Batch Processing**: Handle large numbers of images, including recursive processing of subdirectories.
 - **Dry-Run Capability**: Preview resizing operations without saving output files.
