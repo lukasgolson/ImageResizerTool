@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/inconshreveable/mousetrap"
@@ -146,13 +145,16 @@ func resizeImage(filePath, outputPath string, dryRun bool, memoryLimit int64, al
 	if newWidth < originalWidth || newHeight < originalHeight {
 		resized := resize.Resize(uint(newWidth), uint(newHeight), img, algorithm)
 		newDPI := int(float64(newWidth) / (float64(originalWidth) / float64(dpi)))
-		return saveImage(resized, outputPath, format, quality, newDPI)
+
+		safePrint(fmt.Sprintf("Resized %s to %dx%d with a DPI of %d", filePath, newWidth, newHeight, newDPI))
+
+		return saveImage(resized, outputPath, format, quality)
 	}
 
 	return nil
 }
 
-func saveImage(img image.Image, outputPath, format string, quality, dpi int) error {
+func saveImage(img image.Image, outputPath, format string, quality int) error {
 	outFile, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
@@ -166,13 +168,10 @@ func saveImage(img image.Image, outputPath, format string, quality, dpi int) err
 		}
 		return nil
 	case "jpeg":
-		buffer := new(bytes.Buffer)
-		if err = jpeg.Encode(buffer, img, &jpeg.Options{Quality: quality}); err != nil {
+		if err = jpeg.Encode(outFile, img, &jpeg.Options{Quality: quality}); err != nil {
 			return fmt.Errorf("failed to encode JPEG: %w", err)
 		}
-		if _, err = outFile.Write(buffer.Bytes()); err != nil {
-			return fmt.Errorf("failed to write JPEG data: %w", err)
-		}
+
 	default:
 		return fmt.Errorf("unsupported output format: %s", format)
 	}
