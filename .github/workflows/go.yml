@@ -27,7 +27,7 @@ jobs:
         zip resizer.zip resizer.exe
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: resizer-windows-zip
         path: resizer.zip
@@ -36,18 +36,30 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-    - name: Download Artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: resizer-windows-zip
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Create Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v1.0.0
-        release_name: Development Build
-        draft: false
-        prerelease: true
-        files: resizer.zip
+      - name: Get Latest Tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+
+      - name: Increment Tag
+        id: increment_tag
+        run: |
+          IFS='.' read -r major minor patch <<< "${latest_tag#v}"
+          patch=$((patch + 1))
+          new_tag="v${major}.${minor}.${patch}"
+          echo "new_tag=$new_tag" >> $GITHUB_ENV
+
+      - name: Create Release and Upload Asset
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.new_tag }}
+          releaseName: "Release ${{ env.new_tag }}"
+          draft: false
+          prerelease: false
+          artifacts: "resizer.zip"
+          token: ${{ secrets.GITHUB_TOKEN }}
