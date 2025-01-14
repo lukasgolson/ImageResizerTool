@@ -13,6 +13,21 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Get Latest Tag
+      id: get_tag
+      run: |
+        git fetch --tags
+        latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "v0.0.0")
+        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+
+    - name: Increment Tag
+      id: increment_tag
+      run: |
+        IFS='.' read -r major minor patch <<< "${latest_tag#v}"
+        patch=$((patch + 1))
+        new_tag="v${major}.${minor}.${patch}"
+        echo "new_tag=$new_tag" >> $GITHUB_ENV
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
@@ -32,40 +47,13 @@ jobs:
         name: resizer-windows-zip
         path: build.zip
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Get Latest Tag
-        id: get_tag
-        run: |
-          git fetch --tags
-          latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "v0.0.0")
-          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
-
-      - name: Increment Tag
-        id: increment_tag
-        run: |
-          IFS='.' read -r major minor patch <<< "${latest_tag#v}"
-          patch=$((patch + 1))
-          new_tag="v${major}.${minor}.${patch}"
-          echo "new_tag=$new_tag" >> $GITHUB_ENV
-
-      - name: Download Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: resizer-windows-zip
-          path: .
+    - name: Create Release and Upload Asset
+      uses: ncipollo/release-action@v1
+      with:
+        tag: ${{ env.new_tag }}
+        draft: false
+        generateReleaseNotes: true
+        artifacts: "resizer.exe"
+        token: ${{ secrets.GITHUB_TOKEN }}
 
 
-      - name: Create Release and Upload Asset
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ env.new_tag }}
-          draft: false
-          generateReleaseNotes: true
-          artifacts: "build.zip"
-          token: ${{ secrets.GITHUB_TOKEN }}
