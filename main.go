@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/cheggaaa/pb/v3"
+	"github.com/inconshreveable/mousetrap"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/nfnt/resize"
 	"github.com/urfave/cli/v2"
@@ -64,7 +66,7 @@ func getPixelFormat(fileExt string) PixelFormat {
 	}
 }
 
-func resizeImage(filePath, outputPath string, memoryLimit int64) error {
+func resizeImage(filePath, outputPath string, memoryLimit int64, algorithm resize.InterpolationFunction, quality int) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
@@ -81,8 +83,8 @@ func resizeImage(filePath, outputPath string, memoryLimit int64) error {
 	newWidth, newHeight := calculateMaxResolution(originalWidth, originalHeight, pixelFormat, 4, memoryLimit)
 
 	if newWidth < originalWidth || newHeight < originalHeight {
-		resized := resize.Resize(uint(newWidth), uint(newHeight), img, resize.Lanczos3)
-		if err := saveImage(resized, outputPath, format); err != nil {
+		resized := resize.Resize(uint(newWidth), uint(newHeight), img, algorithm)
+		if err := saveImage(resized, outputPath, format, quality); err != nil {
 			return err
 		}
 	}
@@ -90,7 +92,7 @@ func resizeImage(filePath, outputPath string, memoryLimit int64) error {
 	return nil
 }
 
-func saveImage(img image.Image, outputPath, format string) error {
+func saveImage(img image.Image, outputPath, format string, quality int) error {
 	outFile, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
@@ -101,13 +103,15 @@ func saveImage(img image.Image, outputPath, format string) error {
 	case "png":
 		return png.Encode(outFile, img)
 	case "jpeg":
-		return jpeg.Encode(outFile, img, nil)
+		return jpeg.Encode(outFile, img, &jpeg.Options{Quality: quality})
 	default:
 		return fmt.Errorf("unsupported output format: %s", format)
 	}
 }
 
-func processFile(filePath string, memoryLimit int64, outputDir string) {
+func processFile(filePath string, memoryLimit int64, outputDir string, algorithm resize.InterpolationFunction, quality int, dryRun bool, wg *sync.WaitGroup, bar *pb.ProgressBar) {
+	defer wg.Done()
+
 	// Ensure the output directory exists
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
 		fmt.Println("Error creating output directory:", err)
@@ -118,77 +122,108 @@ func processFile(filePath string, memoryLimit int64, outputDir string) {
 	outputFileName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + "-fixed" + filepath.Ext(filePath)
 	outputPath := filepath.Join(outputDir, outputFileName)
 
+	if _, err := os.Stat(outputPath); err == nil {
+		fmt.Println("Skipping existing file:", outputPath)
+		bar.Increment()
+		return
+	}
+
+	if dryRun {
+		fmt.Println("Dry run: Skipping save for", filePath)
+		bar.Increment()
+		return
+	}
+
 	fmt.Println("Processing file:", filePath)
-	if err := resizeImage(filePath, outputPath, memoryLimit); err != nil {
+	if err := resizeImage(filePath, outputPath, memoryLimit, algorithm, quality); err != nil {
 		fmt.Println("Error resizing image:", err)
 	} else {
 		fmt.Println("Image resized and saved as:", outputPath)
 	}
+
+	bar.Increment()
 }
 
-func processPath(path string, memoryLimit int64, outputDir string) {
+func processPath(path string, memoryLimit int64, outputDir string, algorithm resize.InterpolationFunction, quality int, dryRun bool, recursive bool) {
 	info, err := os.Stat(path)
 	if err != nil {
 		fmt.Println("Error accessing path:", err)
 		return
 	}
 
+	var files []string
+
 	if info.IsDir() {
-		processDirectory(path, memoryLimit, outputDir)
+		files = collectFiles(path, recursive)
 	} else {
-		// Single file processing with a simple progress bar
-		bar := pb.StartNew(1)
-		processSingleFile(path, memoryLimit, outputDir)
-		bar.Increment()
-		bar.Finish()
-	}
-}
-
-func processDirectory(path string, memoryLimit int64, outputDir string) {
-	files, err := os.ReadDir(path)
-	if err != nil {
-		fmt.Println("Error reading directory:", err)
-		return
+		files = []string{path}
 	}
 
-	// Filter valid image files
-	imageFiles := []os.DirEntry{}
+	bar := pb.StartNew(len(files))
+	var wg sync.WaitGroup
+
 	for _, file := range files {
-		if !file.IsDir() {
-			ext := strings.ToLower(filepath.Ext(file.Name()))
-			if isValidImageExtension(ext) {
-				imageFiles = append(imageFiles, file)
-			}
+		ext := strings.ToLower(filepath.Ext(file))
+		if isValidImageExtension(ext) {
+			wg.Add(1)
+			go processFile(file, memoryLimit, outputDir, algorithm, quality, dryRun, &wg, bar)
 		}
 	}
 
-	// Initialize the progress bar
-	bar := pb.StartNew(len(imageFiles))
-
-	// Process each file with progress bar
-	for _, file := range imageFiles {
-		processFile(filepath.Join(path, file.Name()), memoryLimit, outputDir)
-		bar.Increment()
-	}
-
-	// Finish the progress bar
+	wg.Wait()
 	bar.Finish()
 }
 
-func processSingleFile(path string, memoryLimit int64, outputDir string) {
-	ext := strings.ToLower(filepath.Ext(path))
-	if isValidImageExtension(ext) {
-		processFile(path, memoryLimit, outputDir)
-	} else {
-		fmt.Println("Unsupported file type:", path)
-	}
+func collectFiles(dir string, recursive bool) []string {
+	var files []string
+
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !d.IsDir() {
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if isValidImageExtension(ext) {
+				files = append(files, path)
+			}
+		}
+
+		if !recursive && d.IsDir() && path != dir {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+
+	return files
 }
 
 func isValidImageExtension(ext string) bool {
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
 }
 
+func getResizeAlgorithm(name string) resize.InterpolationFunction {
+	switch strings.ToLower(name) {
+	case "bilinear":
+		return resize.Bilinear
+	case "nearest":
+		return resize.NearestNeighbor
+	default:
+		return resize.Lanczos3
+	}
+}
+
 func main() {
+	if mousetrap.StartedByExplorer() {
+		fmt.Println("This application cannot be run by double-clicking it. Please run it from a console or drag your images onto the executable.")
+		fmt.Println("Press Enter to exit...")
+		_, err := fmt.Scanln()
+		if err != nil {
+			return
+		}
+		os.Exit(1)
+	}
+
 	app := &cli.App{
 		Name:  "Resizer",
 		Usage: "Resize images to fit within a memory limit",
@@ -205,17 +240,42 @@ func main() {
 				Usage:   "Directory to save resized images (default: current working directory)",
 				Value:   ".", // Default to the current working directory
 			},
+			&cli.StringFlag{
+				Name:    "algorithm",
+				Aliases: []string{"a"},
+				Usage:   "Resize algorithm to use (lanczos, bilinear, nearest)",
+				Value:   "lanczos",
+			},
+			&cli.IntFlag{
+				Name:    "quality",
+				Aliases: []string{"q"},
+				Usage:   "JPEG quality (1-100)",
+				Value:   75,
+			},
+			&cli.BoolFlag{
+				Name:  "dry-run",
+				Usage: "Simulate resizing without saving files",
+			},
+			&cli.BoolFlag{
+				Name:    "recursive",
+				Aliases: []string{"r"},
+				Usage:   "Process directories recursively",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			memoryLimit := c.Int64("memory")
 			outputDir := c.String("output")
+			algorithm := getResizeAlgorithm(c.String("algorithm"))
+			quality := c.Int("quality")
+			dryRun := c.Bool("dry-run")
+			recursive := c.Bool("recursive")
 
 			if c.NArg() == 0 {
 				return fmt.Errorf("no input files or directories provided")
 			}
 
 			for _, path := range c.Args().Slice() {
-				processPath(path, memoryLimit, outputDir)
+				processPath(path, memoryLimit, outputDir, algorithm, quality, dryRun, recursive)
 			}
 			return nil
 		},
