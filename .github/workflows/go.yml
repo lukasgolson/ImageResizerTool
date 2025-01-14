@@ -58,8 +58,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ env.new_tag }}
-          releaseName: "Release ${{ env.new_tag }}"
           draft: false
-          prerelease: false
-          artifacts: "resizer.zip"
+          generateReleaseNotes: true
+          artifacts: "resizer-windows-zip"
           token: ${{ secrets.GITHUB_TOKEN }}
