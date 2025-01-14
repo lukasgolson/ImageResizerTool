@@ -24,7 +24,7 @@ jobs:
 
     - name: Zip the executable
       run: |
-        zip resizer.zip resizer.exe
+        zip build.zip resizer.exe
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
