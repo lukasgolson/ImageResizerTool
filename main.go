@@ -119,7 +119,7 @@ func processFile(filePath string, memoryLimit int64, outputDir string, algorithm
 	}
 
 	// Generate the output file path in the specified directory
-	outputFileName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + "-fixed" + filepath.Ext(filePath)
+	outputFileName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + "-resized" + filepath.Ext(filePath)
 	outputPath := filepath.Join(outputDir, outputFileName)
 
 	if _, err := os.Stat(outputPath); err == nil {
@@ -214,7 +214,11 @@ func getResizeAlgorithm(name string) resize.InterpolationFunction {
 }
 
 func main() {
-	if mousetrap.StartedByExplorer() {
+
+	// Check if the application was started by double-clicking without arguments
+
+	var args = os.Args[1:]
+	if len(args) == 0 && mousetrap.StartedByExplorer() {
 		fmt.Println("This application cannot be run by double-clicking it. Please run it from a console or drag your images onto the executable.")
 		fmt.Println("Press Enter to exit...")
 		_, err := fmt.Scanln()

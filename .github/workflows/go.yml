@@ -30,7 +30,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: resizer-windows-zip
-        path: resizer.zip
+        path: build.zip
 
   release:
     needs: build
@@ -54,11 +54,18 @@ jobs:
           new_tag="v${major}.${minor}.${patch}"
           echo "new_tag=$new_tag" >> $GITHUB_ENV
 
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: resizer-zip
+          path: .
+
+
       - name: Create Release and Upload Asset
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ env.new_tag }}
           draft: false
           generateReleaseNotes: true
-          artifacts: "resizer-windows-zip"
+          artifacts: "build.zip"
           token: ${{ secrets.GITHUB_TOKEN }}
